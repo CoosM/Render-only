@@ -44,7 +44,6 @@ RSI_OVERSOLD = 30
 # =========================================================
 
 STATE_FILE_NAME = "state.json"
-RUNTIME_FILE_NAME = "strategy_runtime.json"
 
 cached_state = None
 LAST_KNOWN_STATE = {
@@ -52,7 +51,8 @@ LAST_KNOWN_STATE = {
     "okx": 0
 }
 
-cached_runtime = None
+# Последняя обработанная свеча хранится только в RAM.
+# В Gist НЕ сохраняется.
 LAST_PROCESSED_TS = None
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -176,130 +176,6 @@ def save_state(state):
     except Exception as e:
 
         log(f"⚠️ save_state error: {e}")
-
-        return False
-
-
-# =========================================================
-# ====================== RUNTIME ===========================
-# =========================================================
-
-def load_runtime_state():
-
-    global cached_runtime
-    global LAST_PROCESSED_TS
-
-    if cached_runtime is not None:
-        return cached_runtime
-
-    try:
-
-        url = f"https://api.github.com/gists/{GIST_ID}"
-
-        r = requests.get(
-            url,
-            headers=HEADERS_GIST,
-            timeout=10
-        )
-
-        r.raise_for_status()
-
-        files = r.json()["files"]
-
-        if RUNTIME_FILE_NAME in files:
-
-            runtime = json.loads(
-                files[RUNTIME_FILE_NAME]["content"]
-            )
-
-            last_ts = runtime.get(
-                "last_processed_ts"
-            )
-
-            if last_ts is not None:
-                last_ts = int(last_ts)
-
-        else:
-
-            runtime = {
-                "last_processed_ts": None
-            }
-
-            last_ts = None
-
-        cached_runtime = runtime
-        LAST_PROCESSED_TS = last_ts
-
-        log(
-            f"ℹ️ Runtime loaded | "
-            f"last_processed_ts={LAST_PROCESSED_TS}"
-        )
-
-        return cached_runtime
-
-    except Exception as e:
-
-        log(
-            f"⚠️ load_runtime_state error: {e}"
-        )
-
-        return {
-            "last_processed_ts": LAST_PROCESSED_TS
-        }
-
-
-def save_runtime_state(last_processed_ts):
-
-    global cached_runtime
-    global LAST_PROCESSED_TS
-
-    try:
-
-        runtime = {
-            "last_processed_ts": int(
-                last_processed_ts
-            )
-        }
-
-        url = f"https://api.github.com/gists/{GIST_ID}"
-
-        payload = {
-            "files": {
-                RUNTIME_FILE_NAME: {
-                    "content": json.dumps(
-                        runtime,
-                        separators=(",", ":")
-                    )
-                }
-            }
-        }
-
-        r = requests.patch(
-            url,
-            headers=HEADERS_GIST,
-            json=payload,
-            timeout=10
-        )
-
-        r.raise_for_status()
-
-        cached_runtime = runtime
-        LAST_PROCESSED_TS = int(
-            last_processed_ts
-        )
-
-        log(
-            f"💾 Runtime saved | "
-            f"last_processed_ts={last_processed_ts}"
-        )
-
-        return True
-
-    except Exception as e:
-
-        log(
-            f"⚠️ save_runtime_state error: {e}"
-        )
 
         return False
 
@@ -1170,13 +1046,8 @@ def process_candle(
             f"signal=NONE"
         )
 
-        # Даже свечу без сигнала
-        # считаем обработанной
-        if not save_runtime_state(ts):
-
-            log(
-                "⚠️ Runtime save failed"
-            )
+        # Свеча считается обработанной только в RAM.
+        LAST_PROCESSED_TS = ts
 
         return
 
@@ -1231,13 +1102,9 @@ def process_candle(
             "executes Bitget only."
         )
 
-    # После попытки сигнала
-    # свеча считается обработанной.
-    if not save_runtime_state(ts):
-
-        log(
-            "⚠️ Runtime save failed after signal"
-        )
+    # После обработки сигнала
+    # свеча считается обработанной только в RAM.
+    LAST_PROCESSED_TS = ts
 
 
 # =========================================================
@@ -1275,7 +1142,6 @@ def strategy_engine():
     )
 
     load_state()
-    load_runtime_state()
 
     last_cycle_candle_ts = None
 
